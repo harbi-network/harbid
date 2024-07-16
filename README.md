@@ -1,4 +1,5 @@
-![harbi_github](https://github.com/harbi-network/harbid/assets/162858406/4469497d-1e57-4975-b2eb-6dc15e6e4683)
+
+![harbi_github](https://github.com/user-attachments/assets/8193147d-0385-4fde-9d0a-6e5cdec885c3)
 
 # Harbid
 
@@ -98,7 +99,7 @@ At this point your can close the wallet daemon, though you should keep it runnin
 
 
 ## Discord
-Join our discord server using the following link: https://discord.gg/
+Join our discord server using the following link: [https://discord.gg/](https://discord.gg/kkBvCtyG4S)
 
 ## Issue Tracker
 
