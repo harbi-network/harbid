@@ -213,6 +213,11 @@ var MainnetParams = Params{
 	RPCPort:     "24110",
 	DefaultPort: "24111",
 	DNSSeeds: []string{
+                "seeder1-mainnet.harbi-network.com",
+                "seeder2-mainnet.harbi-network.com",
+                "seeder3-mainnet.harbi-network.com",
+                "harbi-network.com",
+                "harbi4.online",
 
 	},
 
