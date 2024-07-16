@@ -1,13 +1,15 @@
 package main
 
 import (
-	nativeerrors "errors"
-	"math/rand"
+	"crypto/rand"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/harbi-network/harbid/version"
-
 	"github.com/harbi-network/harbid/app/appmessage"
 	"github.com/harbi-network/harbid/cmd/harbiminer/templatemanager"
 	"github.com/harbi-network/harbid/domain/consensus/model/externalapi"
@@ -15,7 +17,6 @@ import (
 	"github.com/harbi-network/harbid/domain/consensus/utils/pow"
 	"github.com/harbi-network/harbid/infrastructure/network/netadapter/router"
 	"github.com/harbi-network/harbid/util"
-	"github.com/pkg/errors"
 )
 
 var hashesTried uint64
@@ -25,29 +26,26 @@ const logHashRateInterval = 10 * time.Second
 
 func mineLoop(client *minerClient, numberOfBlocks uint64, targetBlocksPerSecond float64, mineWhenNotSynced bool,
 	miningAddr util.Address) error {
-	rand.Seed(time.Now().UnixNano()) // Seed the global concurrent-safe random source.
-
 	errChan := make(chan error)
 	doneChan := make(chan struct{})
 
-	// We don't want to send router.DefaultMaxMessages blocks at once because there's
-	// a high chance we'll get disconnected from the node, so we make the channel
-	// capacity router.DefaultMaxMessages/2 (we give some slack for getBlockTemplate
-	// requests)
 	foundBlockChan := make(chan *externalapi.DomainBlock, router.DefaultMaxMessages/2)
 
 	spawn("templatesLoop", func() {
 		templatesLoop(client, miningAddr, errChan)
 	})
 
+	numCores := runtime.NumCPU()
+	for i := 0; i < numCores; i++ {
+		spawn(fmt.Sprintf("miningWorker-%d", i), func() {
+			mineWorker(foundBlockChan, mineWhenNotSynced)
+		})
+	}
+
 	spawn("blocksLoop", func() {
 		const windowSize = 10
 		hasBlockRateTarget := targetBlocksPerSecond != 0
 		var windowTicker, blockTicker *time.Ticker
-		// We use tickers to limit the block rate:
-		// 1. windowTicker -> makes sure that the last windowSize blocks take at least windowSize*targetBlocksPerSecond.
-		// 2. blockTicker -> makes sure that each block takes at least targetBlocksPerSecond/windowSize.
-		// that way we both allow for fluctuation in block rate but also make sure they're not too big (by an order of magnitude)
 		if hasBlockRateTarget {
 			windowRate := time.Duration(float64(time.Second) / (targetBlocksPerSecond / windowSize))
 			blockRate := time.Duration(float64(time.Second) / (targetBlocksPerSecond * windowSize))
@@ -59,7 +57,7 @@ func mineLoop(client *minerClient, numberOfBlocks uint64, targetBlocksPerSecond 
 		}
 		windowStart := time.Now()
 		for blockIndex := 1; ; blockIndex++ {
-			foundBlockChan <- mineNextBlock(mineWhenNotSynced)
+			block := <-foundBlockChan
 			if hasBlockRateTarget {
 				<-blockTicker.C
 				if (blockIndex % windowSize) == 0 {
@@ -69,19 +67,12 @@ func mineLoop(client *minerClient, numberOfBlocks uint64, targetBlocksPerSecond 
 					windowStart = time.Now()
 				}
 			}
-		}
-	})
-
-	spawn("handleFoundBlock", func() {
-		for i := uint64(0); numberOfBlocks == 0 || i < numberOfBlocks; i++ {
-			block := <-foundBlockChan
 			err := handleFoundBlock(client, block)
 			if err != nil {
 				errChan <- err
 				return
 			}
 		}
-		doneChan <- struct{}{}
 	})
 
 	logHashRate()
@@ -98,7 +89,6 @@ func logHashRate() {
 	spawn("logHashRate", func() {
 		lastCheck := time.Now()
 		for range time.Tick(logHashRateInterval) {
-
 			if !dagReady {
 				log.Infof("Generating DAG, please wait ...")
 				continue
@@ -110,8 +100,7 @@ func logHashRate() {
 			hashRate := kiloHashesTried / currentTime.Sub(lastCheck).Seconds()
 			log.Infof("Current hash rate is %.2f Khash/s", hashRate)
 			lastCheck = currentTime
-			// subtract from hashesTried the hashes we already sampled
-			atomic.AddUint64(&hashesTried, -currentHashesTried)
+			atomic.StoreUint64(&hashesTried, 0)
 		}
 	})
 }
@@ -122,11 +111,11 @@ func handleFoundBlock(client *minerClient, block *externalapi.DomainBlock) error
 
 	rejectReason, err := client.SubmitBlock(block)
 	if err != nil {
-		if nativeerrors.Is(err, router.ErrTimeout) {
+		if errors.Is(err, router.ErrTimeout) {
 			log.Warnf("Got timeout while submitting block %s to %s: %s", blockHash, client.Address(), err)
 			return client.Reconnect()
 		}
-		if nativeerrors.Is(err, router.ErrRouteClosed) {
+		if errors.Is(err, router.ErrRouteClosed) {
 			log.Debugf("Got route is closed while requesting block template from %s. "+
 				"The client is most likely reconnecting", client.Address())
 			return nil
@@ -137,24 +126,31 @@ func handleFoundBlock(client *minerClient, block *externalapi.DomainBlock) error
 			time.Sleep(waitTime)
 			return nil
 		}
-		return errors.Wrapf(err, "Error submitting block %s to %s", blockHash, client.Address())
+		return fmt.Errorf("error submitting block %s to %s: %w", blockHash, client.Address(), err)
 	}
 	return nil
 }
 
-func mineNextBlock(mineWhenNotSynced bool) *externalapi.DomainBlock {
-	nonce := rand.Uint64() // Use the global concurrent-safe random source.
+func mineWorker(foundBlockChan chan<- *externalapi.DomainBlock, mineWhenNotSynced bool) {
+	for {
+		block, err := mineNextBlock(mineWhenNotSynced)
+		if err != nil {
+			log.Errorf("Error mining block: %s", err)
+			continue
+		}
+		foundBlockChan <- block
+	}
+}
+
+func mineNextBlock(mineWhenNotSynced bool) (*externalapi.DomainBlock, error) {
+	var nonce uint64
+	_ = binary.Read(rand.Reader, binary.LittleEndian, &nonce)
+
 	for {
 		if !dagReady {
 			continue
 		}
 		nonce++
-		//fmt.Printf("mineNextBlock -- log1\n")
-		// For each nonce we try to build a block from the most up to date
-		// block template.
-		// In the rare case where the nonce space is exhausted for a specific
-		// block, it'll keep looping the nonce until a new block template
-		// is discovered.
 		block, state := getBlockForMining(mineWhenNotSynced)
 		state.Nonce = nonce
 		atomic.AddUint64(&hashesTried, 1)
@@ -163,7 +159,7 @@ func mineNextBlock(mineWhenNotSynced bool) *externalapi.DomainBlock {
 			mutHeader.SetNonce(nonce)
 			block.Header = mutHeader.ToImmutable()
 			log.Infof("Found block %s with parents %s", consensushashing.BlockHash(block), block.Header.DirectParents())
-			return block
+			return block, nil
 		}
 	}
 }
@@ -200,7 +196,7 @@ func getBlockForMining(mineWhenNotSynced bool) (*externalapi.DomainBlock, *pow.S
 func templatesLoop(client *minerClient, miningAddr util.Address, errChan chan error) {
 	getBlockTemplate := func() {
 		template, err := client.GetBlockTemplate(miningAddr.String(), "harbiminer-"+version.Version())
-		if nativeerrors.Is(err, router.ErrTimeout) {
+		if errors.Is(err, router.ErrTimeout) {
 			log.Warnf("Got timeout while requesting block template from %s: %s", client.Address(), err)
 			reconnectErr := client.Reconnect()
 			if reconnectErr != nil {
@@ -208,21 +204,19 @@ func templatesLoop(client *minerClient, miningAddr util.Address, errChan chan er
 			}
 			return
 		}
-		if nativeerrors.Is(err, router.ErrRouteClosed) {
+		if errors.Is(err, router.ErrRouteClosed) {
 			log.Debugf("Got route is closed while requesting block template from %s. "+
 				"The client is most likely reconnecting", client.Address())
 			return
 		}
 		if err != nil {
-			errChan <- errors.Wrapf(err, "Error getting block template from %s", client.Address())
+			errChan <- fmt.Errorf("error getting block template from %s: %w", client.Address(), err)
 			return
 		}
 		err = templatemanager.Set(template, backendLog)
-		// after first template DAG is supposed to be ready
-		// TODO: refresh dag status in real time
 		dagReady = true
 		if err != nil {
-			errChan <- errors.Wrapf(err, "Error setting block template from %s", client.Address())
+			errChan <- fmt.Errorf("error setting block template from %s: %w", client.Address(), err)
 			return
 		}
 	}
