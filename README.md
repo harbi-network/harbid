@@ -109,7 +109,7 @@ is used for this project.
 
 ## Documentation
 
-The [documentation](https://github.com/harbi-network/docs) is a work-in-progress
+The [documentation](https://harbi-network.com/docs/) is a work-in-progress
 
 ## License
 
