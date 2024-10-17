@@ -11,7 +11,7 @@ const eps float64 = 1e-9
 
 type matrix [64][64]uint16
 
-func generateHarbiMatrix(hash *externalapi.DomainHash) *matrix {
+func generateMatrix(hash *externalapi.DomainHash) *matrix {
 	var mat matrix
 	generator := newxoShiRo256PlusPlus(hash)
 	for {
@@ -63,7 +63,7 @@ func (mat *matrix) computeRank() int {
 	return rank
 }
 
-func (mat *matrix) HeavyHarbiHash(hash *externalapi.DomainHash) *externalapi.DomainHash {
+func (mat *matrix) HeavyHash(hash *externalapi.DomainHash) *externalapi.DomainHash {
 	hashBytes := hash.ByteArray()
 	var vector [64]uint16
 	var product [64]uint16

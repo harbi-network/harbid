@@ -63,6 +63,12 @@ func NewBlockHashWriter() HashWriter {
 	return HashWriter{blake}
 }
 
+// PoWHashWriter Returns a new HashWriter used for the PoW function
+func PoWHashWriter() HashWriter {
+	blake := blake3.New(32, nil)
+	return HashWriter{blake}
+}
+
 // NewPoWHashWriter Returns a new HashWriter used for the PoW function
 func NewPoWHashWriter() HashWriter {
 	blake := blake3.New(32, nil)

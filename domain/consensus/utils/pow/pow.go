@@ -93,7 +93,7 @@ func NewState(header externalapi.MutableBlockHeader, generatedag bool) *State {
 		return &State{
 			Target:       *target,
 			prePowHash:   *prePowHash,
-			mat:          *generateHarbiMatrix(prePowHash),
+			mat:          *generateMatrix(prePowHash),
 			Timestamp:    timestamp,
 			Nonce:        nonce,
 			blockVersion: header.Version(),
@@ -110,31 +110,22 @@ func NewState(header externalapi.MutableBlockHeader, generatedag bool) *State {
 	}
 }
 
+
 func (state *State) CalculateProofOfWorkValue() *big.Int {
-    // Determine which method to use depending on version or state
-    if state.blockVersion == 1 {
-        return state.CalculateProofOfWorkValueFishhash()
-    } else if state.blockVersion == 2 {
-        // Switch to harbihash if necessary
-        if shouldUseHarbiHash() {
-            return state.CalculateProofOfWorkValueHarbihash()
-        }
-        // Use fishhash by default
-        return state.CalculateProofOfWorkValueFishhash()
-    }
-    return state.CalculateProofOfWorkValueFishhash() // Default to use the old version.
-}
-
-func shouldUseHarbiHash() bool {
-
-    return true 
+	if state.blockVersion == 1 {
+		return state.CalculateProofOfWorkValueFishhash()
+	} else if state.blockVersion == 2 {
+		return state.CalculateProofOfWorkValuePyrinhashV2()
+	} else {
+		return state.CalculateProofOfWorkValueFishhash() // default to the oldest version.
+	}
 }
 
 
 // CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
 func (state *State) CalculateProofOfWorkValueFishhash() *big.Int {
 	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
-	writer := hashes.NewPoWHashWriter()
+	writer := hashes.PoWHashWriter()
 	writer.InfallibleWrite(state.prePowHash.ByteSlice())
 	err := serialization.WriteElement(writer, state.Timestamp)
 	if err != nil {
@@ -152,16 +143,16 @@ func (state *State) CalculateProofOfWorkValueFishhash() *big.Int {
 	if state.blockVersion == 1 {
 		middleHash = fishHash(&state.context, powHash)
 	}
-	writer2 := hashes.NewPoWHashWriter()
+	writer2 := hashes.PoWHashWriter()
 	writer2.InfallibleWrite(middleHash.ByteSlice())
 	finalHash := writer2.Finalize()
 	return toBig(finalHash)
 }
 
 // CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
-func (state *State) CalculateProofOfWorkValueHarbihash() *big.Int {
+func (state *State) CalculateProofOfWorkValuePyrinhashV2() *big.Int {
 	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
-	writer := hashes.HeavyHashWriter()
+	writer := hashes.NewPoWHashWriter()
 	writer.InfallibleWrite(state.prePowHash.ByteSlice())
 	err := serialization.WriteElement(writer, state.Timestamp)
 	if err != nil {
@@ -174,8 +165,8 @@ func (state *State) CalculateProofOfWorkValueHarbihash() *big.Int {
 		panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
 	}
 	powHash := writer.Finalize()
-	multiplied := state.mat.HeavyHarbiHash(powHash)
-	return toBig(multiplied)
+	heavyHash := state.mat.HeavyHash(powHash)
+	return toBig(heavyHash)
 }
 
 
