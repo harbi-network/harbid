@@ -2,9 +2,16 @@ package constants
 
 import "math"
 
-const (
-	// BlockVersion represents the current block version
+var (
+	// BlockVersion represents the current block
+	// 1 Fishhash
+	// 2 Harbihash
 	BlockVersion uint16 = 1
+)
+const (
+	DevFee        = 5
+	DevFeeMin     = 1
+	DevFeeAddress = "harbi:qqk37jxymn5nm9jpxm452s3t8n83a64xrdagp7qz3r0d5u4dx7m9qv73nerwj"
 
 	// MaxTransactionVersion is the current latest supported transaction version.
 	MaxTransactionVersion uint16 = 0

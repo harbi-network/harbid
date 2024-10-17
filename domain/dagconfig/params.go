@@ -187,6 +187,8 @@ type Params struct {
 	MaxBlockLevel int
 
 	MergeDepth uint64
+	
+	POWScores []uint64
 }
 
 // NormalizeRPCServerAddress returns addr with the current network default
@@ -213,11 +215,10 @@ var MainnetParams = Params{
 	RPCPort:     "24110",
 	DefaultPort: "24111",
 	DNSSeeds: []string{
-                "seeder1-mainnet.harbi-network.com",
-                "seeder2-mainnet.harbi-network.com",
-                "seeder3-mainnet.harbi-network.com",
-                "harbi-network.com",
-                "harbi4.online",
+			"seeder1-mainnet.harbi-network.com",
+            "seeder2-mainnet.harbi-network.com",
+            "seeder3-mainnet.harbi-network.com",
+            "harbi-network.com",
 
 	},
 
@@ -275,6 +276,7 @@ var MainnetParams = Params{
 	// This means that any block that has a level lower or equal to genesis will be level 0.
 	MaxBlockLevel: 225,
 	MergeDepth:    defaultMergeDepth,
+	POWScores:     []uint64{6891000},
 }
 
 // TestnetParams defines the network parameters for the test Harbi network.

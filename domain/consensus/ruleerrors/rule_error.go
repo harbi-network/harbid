@@ -10,6 +10,16 @@ import (
 
 // These constants are used to identify a specific RuleError.
 var (
+
+	// DaaScoreNil indicates that the DAA Score is zero or negative.
+	DaaScoreNil = newRuleError("DaaScoreNil")
+	// PowScoresEmpty indicates that there are no hard fork DAA Scores defined.
+	PowScoresEmpty = newRuleError("PowScoresEmpty")
+	
+	// ErrDevFeeNotIncluded indicates that the transactions do not
+	// include dev fee.
+	ErrDevFeeNotIncluded = newRuleError("ErrDevFeeNotIncluded")
+
 	// ErrDuplicateBlock indicates a block with the same hash already
 	// exists.
 	ErrDuplicateBlock = newRuleError("ErrDuplicateBlock")

@@ -4,13 +4,14 @@ import (
 	"math"
 
 	"github.com/harbi-network/harbid/domain/consensus/model/externalapi"
+	"github.com/harbi-network/harbid/domain/consensus/utils/hashes"
 )
 
 const eps float64 = 1e-9
 
 type matrix [64][64]uint16
 
-func generateMatrix(hash *externalapi.DomainHash) *matrix {
+func generateHarbiMatrix(hash *externalapi.DomainHash) *matrix {
 	var mat matrix
 	generator := newxoShiRo256PlusPlus(hash)
 	for {
@@ -62,7 +63,7 @@ func (mat *matrix) computeRank() int {
 	return rank
 }
 
-func (mat *matrix) HeavyHash(hash *externalapi.DomainHash) *externalapi.DomainHash {
+func (mat *matrix) HeavyHarbiHash(hash *externalapi.DomainHash) *externalapi.DomainHash {
 	hashBytes := hash.ByteArray()
 	var vector [64]uint16
 	var product [64]uint16
@@ -76,7 +77,7 @@ func (mat *matrix) HeavyHash(hash *externalapi.DomainHash) *externalapi.DomainHa
 		for j := 0; j < 64; j++ {
 			sum += mat[i][j] * vector[j]
 		}
-		product[i] = sum >> 10
+		product[i] = (sum & 0xF) ^ ((sum >> 4) & 0xF) ^ ((sum >> 8) & 0xF)
 	}
 
 	// Concatenate 4 LSBs back to 8 bit xor with sum1
@@ -85,10 +86,7 @@ func (mat *matrix) HeavyHash(hash *externalapi.DomainHash) *externalapi.DomainHa
 		res[i] = hashBytes[i] ^ (byte(product[2*i]<<4) | byte(product[2*i+1]))
 	}
 	// Hash again
-	/*
-		writer := hashes.NewHeavyHashWriter()
-		writer.InfallibleWrite(res[:])
-		return writer.Finalize()
-	*/
-	return externalapi.NewDomainHashFromByteArray(&res)
+	writer := hashes.HeavyHashWriter()
+	writer.InfallibleWrite(res[:])
+	return writer.Finalize()
 }

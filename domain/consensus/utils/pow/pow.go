@@ -7,13 +7,11 @@ import (
 	"github.com/harbi-network/harbid/domain/consensus/utils/serialization"
 	"github.com/harbi-network/harbid/infrastructure/logger"	
 	"github.com/harbi-network/harbid/util/difficulty"
+	"math/big"
 	"github.com/harbi-network/harbid/util/panics"
 	"github.com/pkg/errors"
 	
-	"math/big"
 )
-
-const hashingAlgoVersion = "fishhash-kls-0.0.2"
 
 // State is an intermediate data structure with pre-computed values to speed up mining.
 type State struct {
@@ -91,14 +89,20 @@ func NewState(header externalapi.MutableBlockHeader, generatedag bool) *State {
 	prePowHash := consensushashing.HeaderHash(header)
 	header.SetTimeInMilliseconds(timestamp)
 	header.SetNonce(nonce)
-	
-	log.Debugf("BlueWork[%s] BlueScore[%d] DAAScore[%d] Version[%d]", header.BlueWork(), header.BlueScore(), header.DAAScore(), header.Version())	
-
+	if header.Version() == 2 {
+		return &State{
+			Target:       *target,
+			prePowHash:   *prePowHash,
+			mat:          *generateHarbiMatrix(prePowHash),
+			Timestamp:    timestamp,
+			Nonce:        nonce,
+			blockVersion: header.Version(),
+		}
+	}
 	return &State{
-		Target:     *target,
-		prePowHash: *prePowHash,
-		//will remove matrix opow
-		//mat:       *generateMatrix(prePowHash),
+		Target:       *target,
+		prePowHash:   *prePowHash,
+		//mat:          *generateMatrix(prePowHash),
 		Timestamp:    timestamp,
 		Nonce:        nonce,
 		context:      *getContext(generatedag, log),
@@ -106,20 +110,29 @@ func NewState(header externalapi.MutableBlockHeader, generatedag bool) *State {
 	}
 }
 
-func GetHashingAlgoVersion() string {
-	return hashingAlgoVersion
+func (state *State) CalculateProofOfWorkValue() *big.Int {
+    // Determine which method to use depending on version or state
+    if state.blockVersion == 1 {
+        return state.CalculateProofOfWorkValueFishhash()
+    } else if state.blockVersion == 2 {
+        // Switch to harbihash if necessary
+        if shouldUseHarbiHash() {
+            return state.CalculateProofOfWorkValueHarbihash()
+        }
+        // Use fishhash by default
+        return state.CalculateProofOfWorkValueFishhash()
+    }
+    return state.CalculateProofOfWorkValueFishhash() // Default to use the old version.
 }
 
-func (state *State) IsContextReady() bool {
-	if state != nil && &state.context != nil {
-		return state.context.ready
-	} else {
-		return false
-	}
+func shouldUseHarbiHash() bool {
+
+    return true 
 }
+
 
 // CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
-func (state *State) CalculateProofOfWorkValue() *big.Int {
+func (state *State) CalculateProofOfWorkValueFishhash() *big.Int {
 	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
 	writer := hashes.NewPoWHashWriter()
 	writer.InfallibleWrite(state.prePowHash.ByteSlice())
@@ -127,37 +140,44 @@ func (state *State) CalculateProofOfWorkValue() *big.Int {
 	if err != nil {
 		panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
 	}
-
 	zeroes := [32]byte{}
 	writer.InfallibleWrite(zeroes[:])
 	err = serialization.WriteElement(writer, state.Nonce)
 	if err != nil {
 		panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
 	}
-	//log.Debugf("Hash prePowHash %x\n", state.prePowHash.ByteSlice())
-	//fmt.Printf("Hash prePowHash %x\n", state.prePowHash.ByteSlice())
 	
 	powHash := writer.Finalize()
-	
-	//middleHash := state.mat.HeavyHash(powHash)
-	//log.Infof("Hash b3-1: %x", powHash.ByteSlice())
 	middleHash := powHash
 	if state.blockVersion == 1 {
 		middleHash = fishHash(&state.context, powHash)
-	} else {
-		middleHash = harhashV2(&state.context, powHash)
 	}
-	
-	//log.Infof("Hash fish: %x", middleHash.ByteSlice())
-
 	writer2 := hashes.NewPoWHashWriter()
 	writer2.InfallibleWrite(middleHash.ByteSlice())
 	finalHash := writer2.Finalize()
-
-	//log.Infof("Hash b3-2: %x", finalHash.ByteSlice())
-
 	return toBig(finalHash)
 }
+
+// CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
+func (state *State) CalculateProofOfWorkValueHarbihash() *big.Int {
+	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
+	writer := hashes.HeavyHashWriter()
+	writer.InfallibleWrite(state.prePowHash.ByteSlice())
+	err := serialization.WriteElement(writer, state.Timestamp)
+	if err != nil {
+		panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
+	}
+	zeroes := [32]byte{}
+	writer.InfallibleWrite(zeroes[:])
+	err = serialization.WriteElement(writer, state.Nonce)
+	if err != nil {
+		panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
+	}
+	powHash := writer.Finalize()
+	multiplied := state.mat.HeavyHarbiHash(powHash)
+	return toBig(multiplied)
+}
+
 
 // IncrementNonce the nonce in State by 1
 func (state *State) IncrementNonce() {
